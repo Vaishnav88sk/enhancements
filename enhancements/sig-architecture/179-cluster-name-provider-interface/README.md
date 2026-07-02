@@ -54,6 +54,9 @@ package providers
 
 import (
 	"context"
+	"sync"
+	"time"
+
 	"k8s.io/client-go/rest"
 )
 
@@ -63,12 +66,17 @@ type ClusterProvider interface {
 }
 
 var registry = make(map[string]ClusterProvider)
+var registryMu sync.RWMutex
 
 func Register(name string, p ClusterProvider) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
 	registry[name] = p
 }
 
 func GetProvider(name string) (ClusterProvider, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	p, exists := registry[name]
 	return p, exists
 }
@@ -83,7 +91,9 @@ if o.ClusterNameProvider != "" {
     if provider, exists := providers.GetProvider(o.ClusterNameProvider); exists {
         config, err := clientcmd.BuildConfigFromFlags("", o.SpokeKubeconfigFile)
         if err == nil {
-            if name, err := provider.DetectClusterName(context.TODO(), config); err == nil && name != "" {
+            ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+            defer cancel()
+            if name, err := provider.DetectClusterName(ctx, config); err == nil && name != "" {
                 clusterName = name
             }
         }
